@@ -74,7 +74,7 @@ function App() {
 
     const handleLogin = async () => {
         try {
-            const res = await fetch('http://localhost:5000/api/auth/login', {
+            const res = await fetch('/api/auth/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ pin, role })
@@ -92,33 +92,33 @@ function App() {
     };
 
     const loadItems = async () => {
-        const res = await fetch('http://localhost:5000/api/items', { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch('/api/items', { headers: { Authorization: `Bearer ${token}` } });
         if (res.ok) setItems(await res.json());
     };
 
     const loadUsers = async () => {
-        const res = await fetch('http://localhost:5000/api/auth/users', { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch('/api/auth/users', { headers: { Authorization: `Bearer ${token}` } });
         if (res.ok) setUsersList(await res.json());
     };
 
     const loadLogs = async () => {
-        const res = await fetch(`http://localhost:5000/api/inventory?date=${date}`, { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch(`/api/inventory?date=${date}`, { headers: { Authorization: `Bearer ${token}` } });
         if (res.ok) setLogs(await res.json());
     };
 
     const loadPayroll = async () => {
-        const res = await fetch('http://localhost:5000/api/payroll', { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch('/api/payroll', { headers: { Authorization: `Bearer ${token}` } });
         if (res.ok) setAllPayrollHistory(await res.json() || []);
     };
 
     const loadFinance = async () => {
-        const res = await fetch(`http://localhost:5000/api/finance/daily?date=${date}`, { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch(`/api/finance/daily?date=${date}`, { headers: { Authorization: `Bearer ${token}` } });
         if (res.ok) setFinance(await res.json());
     };
 
     const loadReport = async (d) => {
         try {
-            const res = await fetch(`http://localhost:5000/api/reports/daily?date=${d}`, { 
+            const res = await fetch(`/api/reports/daily?date=${d}`, { 
                 headers: { Authorization: `Bearer ${token}` } 
             });
             if (res.ok) {
@@ -150,7 +150,7 @@ function App() {
         for (const [itemId, data] of entries) {
             const item = items.find(i => i.id == itemId);
             if (!item) continue;
-            await fetch('http://localhost:5000/api/inventory', {
+            await fetch('/api/inventory', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ item_id: itemId, qty_sold: data.sold, value_sold: data.sold * item.unit_price, notes: 'Batch Tally', date })
@@ -167,7 +167,7 @@ function App() {
     const handleCreateStaff = async (e) => {
         e.preventDefault();
         try {
-            const res = await fetch('http://localhost:5000/api/auth/create-user', {
+            const res = await fetch('/api/auth/create-user', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ name: newStaffName, role: newStaffRole, pin: newStaffPin })
@@ -189,7 +189,7 @@ function App() {
     const handleDeleteStaff = async (id) => {
         if (!window.confirm('Are you sure you want to delete this staff account?')) return;
         try {
-            const res = await fetch(`http://localhost:5000/api/auth/users/${id}`, {
+            const res = await fetch(`/api/auth/users/${id}`, {
                 method: 'DELETE',
                 headers: { Authorization: `Bearer ${token}` }
             });
@@ -208,7 +208,7 @@ function App() {
 
     const handleSalarySubmit = async (e) => {
         e.preventDefault();
-        const res = await fetch('http://localhost:5000/api/payroll', {
+        const res = await fetch('/api/payroll', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
             body: JSON.stringify({ user_id: selectedUserPay, amount: parseFloat(salaryAmount), date: salaryDate, notes: 'Salary' })
@@ -224,7 +224,7 @@ function App() {
     const handleAddItem = async (e) => {
         e.preventDefault();
         if (!itemName || !unitPrice) return;
-        const res = await fetch('http://localhost:5000/api/items', {
+        const res = await fetch('/api/items', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
             body: JSON.stringify({ name: itemName, unit_cost: 0, unit_price: parseFloat(unitPrice) })
@@ -240,7 +240,7 @@ function App() {
     const handleDeleteItem = async (id) => {
         if (!window.confirm('Delete this product?')) return;
         try {
-            const res = await fetch(`http://localhost:5000/api/items/${id}`, {
+            const res = await fetch(`/api/items/${id}`, {
                 method: 'DELETE',
                 headers: { Authorization: `Bearer ${token}` }
             });
@@ -259,7 +259,7 @@ function App() {
     };
 
     const verifyLog = (logId, value) => {
-        fetch(`http://localhost:5000/api/inventory/${logId}/verify`, {
+        fetch(`/api/inventory/${logId}/verify`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
             body: JSON.stringify({ verified_value_sold: parseFloat(value) })
