@@ -254,14 +254,11 @@ app.get('/api/reports/daily', authenticate, requireRole(['manager', 'admin']), (
 });
 
 // --- SERVE FRONTEND (Vite/React Build) ---
-// server.js is inside backend/, so go up one level to reach dist/
-app.use(express.static(path.join(__dirname, '../dist')));
+app.use(express.static(path.join(__dirname, 'dist')));
 
-// Updated catch-all route: use /{*splat} and fix path to ../dist
+// Send index.html for any non-API routes (handles page refr)
 app.get('/{*splat}', (req, res) => {
-    res.sendFile(path.join(__dirname, '../dist', 'index.html'));
+    res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
-// --- START SERVER ---
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`VesPoint Server running on port ${PORT}`));
+app.listen(5000, () => console.log('VesPoint Server running on port 5000'));
