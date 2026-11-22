@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const db = require('./database');
 const bcrypt = require('bcryptjs');
 const { signToken, verifyToken } = require('./auth');
@@ -22,7 +23,7 @@ function authenticate(req, res, next) {
 
 function requireRole(roles) {
     return (req, res, next) => {
-        if (!roles.includes(req.user.role)) {
+        if (!req.user || !roles.includes(req.user.role)) {
             return res.status(403).send('Insufficient permissions');
         }
         next();
@@ -162,12 +163,10 @@ app.get('/api/auth/users', authenticate, requireRole(['admin', 'manager']), (req
     db.all(`SELECT id, name, role FROM users`, [], (err, rows) => res.json(rows));
 });
 
-// UPDATED: DELETE USER ENDPOINT (Admin can delete Employee or Manager)
 app.delete('/api/auth/users/:id', authenticate, requireRole(['admin']), (req, res) => {
     const targetId = parseInt(req.params.id);
     const requesterId = req.user.id;
 
-    // Safety: Cannot delete yourself
     if (targetId === requesterId) {
         return res.status(400).send('You cannot delete your own account.');
     }
@@ -176,12 +175,10 @@ app.delete('/api/auth/users/:id', authenticate, requireRole(['admin']), (req, re
         if (err) return res.status(500).send(err.message);
         if (!targetUser) return res.status(404).send('User not found');
 
-        // Safety: Admins cannot delete other Admins
         if (targetUser.role === 'admin') {
             return res.status(403).send('Cannot delete another Admin. Please demote them first.');
         }
 
-        // Allowed Roles: Employee, Manager
         db.run(`DELETE FROM users WHERE id = ?`, [targetId], function(err) {
             if (err) return res.status(500).send('Error deleting user: ' + err.message);
             res.send(`Successfully deleted ${targetUser.name}`);
@@ -202,7 +199,6 @@ app.get('/api/items', authenticate, (req, res) => {
     db.all(`SELECT * FROM items ORDER BY id DESC`, [], (err, items) => res.json(items));
 });
 
-// UPDATED: ALLOW ANY AUTHENTICATED USER TO DELETE ITEM
 app.delete('/api/items/:id', authenticate, (req, res) => {
     db.serialize(() => {
         db.run(`DELETE FROM inventory_logs WHERE item_id = ?`, [req.params.id]);
@@ -257,4 +253,15 @@ app.get('/api/reports/daily', authenticate, requireRole(['manager', 'admin']), (
     });
 });
 
-app.listen(5000, () => console.log('VesPoint Server running on port 5000'));
+// --- SERVE FRONTEND (Vite/React Build) ---
+// server.js is inside backend/, so go up one level to reach dist/
+app.use(express.static(path.join(__dirname, '../dist')));
+
+// Send index.html for any non-API routes (handles page refreshes)
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../dist', 'index.html'));
+});
+
+// --- START SERVER ---
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`VesPoint Server running on port ${PORT}`));
