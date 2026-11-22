@@ -257,8 +257,8 @@ app.get('/api/reports/daily', authenticate, requireRole(['manager', 'admin']), (
 // server.js is inside backend/, so go up one level to reach dist/
 app.use(express.static(path.join(__dirname, '../dist')));
 
-// Send index.html for any non-API routes (handles page refreshes)
-app.get('*', (req, res) => {
+// Updated catch-all route: use /{*splat} and fix path to ../dist
+app.get('/{*splat}', (req, res) => {
     res.sendFile(path.join(__dirname, '../dist', 'index.html'));
 });
 
