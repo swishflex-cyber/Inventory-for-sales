@@ -67,17 +67,6 @@ db.serialize(() => {
         FOREIGN KEY (created_by) REFERENCES users (id)
     )`);
 
-    // NEW: Stock Purchases Table
-    db.run(`CREATE TABLE IF NOT EXISTS stock_purchases (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        date TEXT NOT NULL,
-        description TEXT,
-        amount REAL NOT NULL,
-        created_by INTEGER,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (created_by) REFERENCES users (id)
-    )`);
-
     // NEW: Daily Reports Table
     db.run(`CREATE TABLE IF NOT EXISTS daily_reports (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
