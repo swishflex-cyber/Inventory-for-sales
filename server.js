@@ -32,19 +32,22 @@ function requireRole(roles) {
 
 // --- DAILY REPORT GENERATOR FUNCTION ---
 function generateReportForDate(dateStr, callback) {
+    // 1. Get Finance Data (Revenue, Labor, Expenses)
     db.all(`
         SELECT 
             COALESCE(SUM(verified_value_sold), 0) as revenue,
-            (SELECT COALESCE(SUM(amount), 0) FROM payroll_logs WHERE date = ?) as labor
+            (SELECT COALESCE(SUM(amount), 0) FROM payroll_logs WHERE date = ?) as labor,
+            (SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE date = ?) as expenses
         FROM inventory_logs 
         WHERE date = ? AND status = 'verified'
-    `, [dateStr, dateStr], (err, financeRows) => {
+    `, [dateStr, dateStr, dateStr], (err, financeRows) => {
         if (err) return callback ? callback(err) : console.error(err);
         
-        const finance = financeRows[0] || { revenue: 0, labor: 0 };
+        const finance = financeRows[0] || { revenue: 0, labor: 0, expenses: 0 };
         const revenue = parseFloat(finance.revenue) || 0;
         const labor = parseFloat(finance.labor) || 0;
-        const netProfit = revenue - labor;
+        const expenses = parseFloat(finance.expenses) || 0;
+        const netProfit = revenue - labor - expenses;
 
         db.all(`
             SELECT 
@@ -70,6 +73,7 @@ function generateReportForDate(dateStr, callback) {
                     report_date: dateStr,
                     total_revenue: revenue,
                     total_labor: labor,
+                    total_expenses: expenses,
                     net_profit: netProfit,
                     top_item_name: topItem ? topItem.name : 'N/A',
                     top_item_qty: topItem ? topItem.total_qty : 0,
@@ -80,13 +84,14 @@ function generateReportForDate(dateStr, callback) {
 
                 db.run(`
                     INSERT INTO daily_reports (
-                        report_date, total_revenue, total_labor, net_profit,
+                        report_date, total_revenue, total_labor, total_expenses, net_profit,
                         top_item_name, top_item_qty, top_item_revenue,
                         pending_count, verified_count
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(report_date) DO UPDATE SET
                         total_revenue = excluded.total_revenue,
                         total_labor = excluded.total_labor,
+                        total_expenses = excluded.total_expenses,
                         net_profit = excluded.net_profit,
                         top_item_name = excluded.top_item_name,
                         top_item_qty = excluded.top_item_qty,
@@ -97,6 +102,7 @@ function generateReportForDate(dateStr, callback) {
                     reportData.report_date,
                     reportData.total_revenue,
                     reportData.total_labor,
+                    reportData.total_expenses,
                     reportData.net_profit,
                     reportData.top_item_name,
                     reportData.top_item_qty,
@@ -238,7 +244,6 @@ app.delete('/api/inventory/:id', authenticate, requireRole(['manager', 'admin'])
                 if (err2) return res.status(500).send('Failed to delete log: ' + err2.message);
 
                 // 3. Delete the Cached Report for that date 
-                // This ensures the "Reports" tab doesn't show outdated data.
                 db.run(`DELETE FROM daily_reports WHERE report_date = ?`, [targetDate], (err3) => {
                     if (err3) {
                         console.error('Failed to delete report cache:', err3);
@@ -264,11 +269,72 @@ app.get('/api/payroll', authenticate, requireRole(['manager', 'admin']), (req, r
     db.all(`SELECT pl.*, u.name as employee_name FROM payroll_logs pl JOIN users u ON pl.user_id = u.id ORDER BY date DESC`, [], (err, rows) => res.json(rows));
 });
 
+// --- NEW: EXPENSES/COGS ROUTES ---
+app.post('/api/expenses', authenticate, requireRole(['manager', 'admin']), (req, res) => {
+    const { description, amount, date } = req.body;
+    db.run(`INSERT INTO expenses (date, description, amount, recorded_by) VALUES (?, ?, ?, ?)`, 
+        [date, description, parseFloat(amount), req.user.id], function(err) {
+            if (err) return res.status(500).send(err.message);
+            
+            // Invalidate the report for this date so it recalculates with the new expense
+            db.run(`DELETE FROM daily_reports WHERE report_date = ?`, [date]);
+            
+            res.send({ id: this.lastID });
+        });
+});
+
+app.get('/api/expenses', authenticate, requireRole(['manager', 'admin']), (req, res) => {
+    // Return all expenses, optionally filtered by date if needed, but let's get all for history
+    db.all(`SELECT e.*, u.name as recorded_by_name FROM expenses e JOIN users u ON e.recorded_by = u.id ORDER BY e.date DESC, e.id DESC`, [], (err, rows) => {
+        if (err) return res.status(500).send(err.message);
+        res.json(rows);
+    });
+});
+
+app.delete('/api/expenses/:id', authenticate, requireRole(['manager', 'admin']), (req, res) => {
+    const expenseId = req.params.id;
+    
+    db.serialize(() => {
+        // 1. Get the date of the expense before deleting it
+        db.get(`SELECT date FROM expenses WHERE id = ?`, [expenseId], (err, row) => {
+            if (err) return res.status(500).send(err.message);
+            if (!row) return res.status(404).send('Expense not found');
+
+            const targetDate = row.date;
+
+            // 2. Delete the Expense
+            db.run(`DELETE FROM expenses WHERE id = ?`, [expenseId], (err2) => {
+                if (err2) return res.status(500).send('Failed to delete expense: ' + err2.message);
+
+                // 3. Delete the Cached Report for that date 
+                // This ensures the "Reports" tab doesn't show outdated data (profit was lower due to this expense)
+                db.run(`DELETE FROM daily_reports WHERE report_date = ?`, [targetDate], (err3) => {
+                    if (err3) {
+                        console.error('Failed to delete report cache:', err3);
+                    }
+                    res.send('Expense deleted. Report cache invalidated.');
+                });
+            });
+        });
+    });
+});
+
 // --- FINANCE ROUTES ---
+// Updated to include expenses in net profit calculation
 app.get('/api/finance/daily', authenticate, requireRole(['manager', 'admin']), (req, res) => {
-    db.all(`SELECT (SELECT COALESCE(SUM(verified_value_sold), 0) FROM inventory_logs WHERE date = ? AND status='verified') as revenue, (SELECT COALESCE(SUM(amount), 0) FROM payroll_logs WHERE date = ?) as labor`, [req.query.date, req.query.date], (err, results) => {
+    db.all(`
+        SELECT 
+            (SELECT COALESCE(SUM(verified_value_sold), 0) FROM inventory_logs WHERE date = ? AND status='verified') as revenue, 
+            (SELECT COALESCE(SUM(amount), 0) FROM payroll_logs WHERE date = ?) as labor,
+            (SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE date = ?) as expenses
+    `, [req.query.date, req.query.date, req.query.date], (err, results) => {
+        if (err) return res.status(500).send(err.message);
         const r = results[0];
-        res.json({ revenue: r.revenue, labor: r.labor, netProfit: r.revenue - r.labor });
+        const revenue = r.revenue || 0;
+        const labor = r.labor || 0;
+        const expenses = r.expenses || 0;
+        const netProfit = revenue - labor - expenses;
+        res.json({ revenue: revenue, labor: labor, expenses: expenses, netProfit: netProfit });
     });
 });
 
