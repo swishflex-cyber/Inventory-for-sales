@@ -258,6 +258,32 @@ function App() {
         }
     };
 
+    // NEW: HANDLE DELETE LOG
+    const handleDeleteLog = async (logId, logDate) => {
+        if (!window.confirm(`Are you sure you want to delete this log entry?\nThis will remove it from Revenue and clear the Report for ${logDate}.`)) return;
+
+        try {
+            const res = await fetch(`/api/inventory/${logId}`, {
+                method: 'DELETE',
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            
+            if (res.ok) {
+                alert('Log deleted. Revenue and Reports updated.');
+                // Refresh current views
+                loadLogs();       // Refresh the table
+                loadFinance();     // Refresh the Revenue/Profit cards
+                // If the user is on Reports tab, they will need to switch tabs to refresh, 
+                // but since we are deleting the cache, next time they view Reports it will be null.
+            } else {
+                const errText = await res.text();
+                alert('Error: ' + errText);
+            }
+        } catch (err) {
+            alert('Network Error: ' + err.message);
+        }
+    };
+
     const verifyLog = (logId, value) => {
         fetch(`/api/inventory/${logId}/verify`, {
             method: 'PUT',
@@ -407,11 +433,33 @@ function App() {
                                                 )}
                                             </td>
                                             <td style={{ ...styles.td, textAlign: 'center' }}>
-                                                {log.status === 'pending' && user.role !== 'employee' ? (
-                                                    <button onClick={() => verifyLog(log.id, document.getElementById(`val-${log.id}`).value)} style={{ background: '#03dac6', border: 'none', borderRadius: '4px', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}>OK</button>
-                                                ) : (
-                                                    <span style={{ fontSize: '11px', color: log.status === 'verified' ? '#03dac6' : '#888' }}>{log.status.toUpperCase()}</span>
-                                                )}
+                                                <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', alignItems: 'center' }}>
+                                                    {/* Verify Button (Only if Pending & Not Employee) */}
+                                                    {log.status === 'pending' && user.role !== 'employee' && (
+                                                        <button 
+                                                            onClick={() => verifyLog(log.id, document.getElementById(`val-${log.id}`).value)} 
+                                                            style={{ background: '#03dac6', border: 'none', borderRadius: '4px', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}
+                                                        >
+                                                            OK
+                                                        </button>
+                                                    )}
+                                                    
+                                                    {/* Status Display */}
+                                                    <span style={{ fontSize: '11px', color: log.status === 'verified' ? '#03dac6' : '#888' }}>
+                                                        {log.status.toUpperCase()}
+                                                    </span>
+
+                                                    {/* Delete Button (Only for Manager/Admin) */}
+                                                    {user.role !== 'employee' && (
+                                                        <button 
+                                                            onClick={() => handleDeleteLog(log.id, log.date)} 
+                                                            style={{ background: '#cf6679', color: 'white', border: 'none', borderRadius: '4px', padding: '6px 8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}
+                                                            title="Delete Log"
+                                                        >
+                                                            DEL
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </td>
                                         </tr>
                                     ))
