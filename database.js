@@ -48,4 +48,72 @@ db.serialize(() => {
     )`);
 
     db.run(`CREATE TABLE IF NOT EXISTS attendance_logs (
-        id INTEGER
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        date DATE DEFAULT (DATE('now')),
+        status TEXT NOT NULL,
+        notes TEXT,
+        FOREIGN KEY (user_id) REFERENCES users (id)
+    )`);
+
+    db.run(`CREATE TABLE IF NOT EXISTS payroll_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        date DATE NOT NULL,
+        amount REAL NOT NULL,
+        notes TEXT,
+        created_by INTEGER,
+        FOREIGN KEY (user_id) REFERENCES users (id),
+        FOREIGN KEY (created_by) REFERENCES users (id)
+    )`);
+
+    // NEW: Stock Purchases Table
+    db.run(`CREATE TABLE IF NOT EXISTS stock_purchases (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        description TEXT,
+        amount REAL NOT NULL,
+        created_by INTEGER,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (created_by) REFERENCES users (id)
+    )`);
+
+    // NEW: Daily Reports Table
+    db.run(`CREATE TABLE IF NOT EXISTS daily_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        report_date TEXT UNIQUE NOT NULL,
+        total_revenue REAL DEFAULT 0,
+        total_labor REAL DEFAULT 0,
+        net_profit REAL DEFAULT 0,
+        top_item_name TEXT,
+        top_item_qty INTEGER DEFAULT 0,
+        top_item_revenue REAL DEFAULT 0,
+        pending_count INTEGER DEFAULT 0,
+        verified_count INTEGER DEFAULT 0,
+        generated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    // --- Admin PIN Logic ---
+    const adminPin = bcrypt.hashSync('4545', 10);
+
+    // Check if admin exists
+    db.get(`SELECT id FROM users WHERE role = 'admin' LIMIT 1`, (err, user) => {
+        if (err) throw err;
+
+        if (user) {
+            // Update existing admin PIN
+            db.run(`UPDATE users SET pin_hash = ? WHERE role = 'admin'`, [adminPin], (err) => {
+                if (err) console.error('Update Admin PIN failed:', err);
+                else console.log('Admin PIN updated to 4545');
+            });
+        } else {
+            // Create new admin if not found
+            db.run(`INSERT INTO users (name, role, pin_hash) VALUES ('VesPoint Admin', 'admin', ?)`, [adminPin], (err) => {
+                if (err) console.error('Insert Admin failed:', err);
+                else console.log('Admin created with PIN 4545');
+            });
+        }
+    });
+});
+
+module.exports = db;
