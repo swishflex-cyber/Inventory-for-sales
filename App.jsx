@@ -10,7 +10,7 @@ function App() {
     const [allPayrollHistory, setAllPayrollHistory] = useState([]);
     const [items, setItems] = useState([]);
     const [usersList, setUsersList] = useState([]);
-    const [finance, setFinance] = useState({ revenue: 0, cogs: 0, labor: 0, expenses: 0, netProfit: 0 });
+    const [finance, setFinance] = useState({ revenue: 0, cogs: 0, labor: 0, netProfit: 0 });
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
     
     // New State for Reports
@@ -34,12 +34,6 @@ function App() {
     const [newStaffRole, setNewStaffRole] = useState('employee');
     const [newStaffPin, setNewStaffPin] = useState('');
 
-    // NEW: Expense States
-    const [expenses, setExpenses] = useState([]);
-    const [expDesc, setExpDesc] = useState('');
-    const [expAmount, setExpAmount] = useState('');
-    const [expDate, setExpDate] = useState(new Date().toISOString().split('T')[0]);
-
     const token = localStorage.getItem('vespoint_token');
 
     useEffect(() => {
@@ -50,7 +44,6 @@ function App() {
                 loadPayroll();
                 loadFinance();
                 loadUsers();
-                loadExpenses(); // NEW
             }
         }
     }, [user, date, view]);
@@ -137,12 +130,6 @@ function App() {
         } catch (e) {
             setReport(null);
         }
-    };
-
-    // NEW: Load Expenses
-    const loadExpenses = async () => {
-        const res = await fetch('/api/expenses', { headers: { Authorization: `Bearer ${token}` } });
-        if (res.ok) setExpenses(await res.json());
     };
 
     const formatPHP = (val) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(val || 0);
@@ -271,53 +258,7 @@ function App() {
         }
     };
 
-    // NEW: HANDLE EXPENSE SUBMIT
-    const handleAddExpense = async (e) => {
-        e.preventDefault();
-        if (!expAmount || !expDate) return;
-        
-        const res = await fetch('/api/expenses', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ description: expDesc, amount: parseFloat(expAmount), date: expDate })
-        });
-        
-        if (res.ok) {
-            alert('Expense recorded. Profit updated.');
-            setExpDesc('');
-            setExpAmount('');
-            loadExpenses();
-            loadFinance(); // Refresh dashboard finance if viewing that date
-        } else {
-            const errText = await res.text();
-            alert('Error: ' + errText);
-        }
-    };
-
-    // NEW: HANDLE DELETE EXPENSE
-    const handleDeleteExpense = async (id) => {
-        if (!window.confirm('Delete this expense? Profit will be recalculated.')) return;
-        
-        const res = await fetch(`/api/expenses/${id}`, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${token}` }
-        });
-        
-        if (res.ok) {
-            alert('Expense deleted. Profit restored.');
-            loadExpenses();
-            loadFinance();
-            // Also reload report if we are on reports tab, though report is cached, 
-            // the backend deleted the cache, so if user switches back to reports, it might show 'No report' 
-            // until next cron or manual refresh. 
-            // For simplicity, we just refresh current view data.
-        } else {
-            const errText = await res.text();
-            alert('Error: ' + errText);
-        }
-    };
-
-    // NEW: HANDLE DELETE LOG (Updated to refresh expenses too just in case, though not strictly needed)
+    // NEW: HANDLE DELETE LOG
     const handleDeleteLog = async (logId, logDate) => {
         if (!window.confirm(`Are you sure you want to delete this log entry?\nThis will remove it from Revenue and clear the Report for ${logDate}.`)) return;
 
@@ -329,8 +270,11 @@ function App() {
             
             if (res.ok) {
                 alert('Log deleted. Revenue and Reports updated.');
-                loadLogs();       
-                loadFinance();     
+                // Refresh current views
+                loadLogs();       // Refresh the table
+                loadFinance();     // Refresh the Revenue/Profit cards
+                // If the user is on Reports tab, they will need to switch tabs to refresh, 
+                // but since we are deleting the cache, next time they view Reports it will be null.
             } else {
                 const errText = await res.text();
                 alert('Error: ' + errText);
@@ -415,7 +359,6 @@ function App() {
                                 <span style={{ fontSize: '12px', color: '#888' }}>NET PROFIT ({date})</span>
                                 <div style={{ fontWeight: 'bold', color: (finance?.netProfit || 0) >= 0 ? '#03dac6' : '#cf6679' }}>{formatPHP(finance?.netProfit)}</div>
                             </div>
-                            {/* Optional: Show Expenses breakdown if needed, but keeping it simple as requested */}
                         </div>
                     )}
 
@@ -491,6 +434,7 @@ function App() {
                                             </td>
                                             <td style={{ ...styles.td, textAlign: 'center' }}>
                                                 <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', alignItems: 'center' }}>
+                                                    {/* Verify Button (Only if Pending & Not Employee) */}
                                                     {log.status === 'pending' && user.role !== 'employee' && (
                                                         <button 
                                                             onClick={() => verifyLog(log.id, document.getElementById(`val-${log.id}`).value)} 
@@ -500,10 +444,12 @@ function App() {
                                                         </button>
                                                     )}
                                                     
+                                                    {/* Status Display */}
                                                     <span style={{ fontSize: '11px', color: log.status === 'verified' ? '#03dac6' : '#888' }}>
                                                         {log.status.toUpperCase()}
                                                     </span>
 
+                                                    {/* Delete Button (Only for Manager/Admin) */}
                                                     {user.role !== 'employee' && (
                                                         <button 
                                                             onClick={() => handleDeleteLog(log.id, log.date)} 
@@ -522,7 +468,7 @@ function App() {
                         </table>
                     </div>
 
-                    {/* PRODUCT MASTER LIST */}
+                    {/* PRODUCT MASTER LIST (MOVED TO DASHBOARD FOR EMPLOYEE ACCESS) */}
                     <div style={styles.card}>
                         <h4 style={{ color: '#888', marginTop: 0, fontSize: '16px' }}>Product Master List</h4>
                         <table style={styles.table}>
@@ -542,6 +488,7 @@ function App() {
                                             <td style={styles.td}><b>{i.name}</b></td>
                                             <td style={{ ...styles.td, textAlign: 'right' }}>{formatPHP(i.unit_price)}</td>
                                             <td style={{ ...styles.td, textAlign: 'center' }}>
+                                                {/* ALL AUTHENTICATED USERS CAN DELETE */}
                                                 <button onClick={() => handleDeleteItem(i.id)} style={styles.btnDelete}>DEL</button>
                                             </td>
                                         </tr>
@@ -685,50 +632,6 @@ function App() {
                             </tbody>
                         </table>
                     </div>
-
-                    {/* NEW: EXPENSES / COGS SECTION */}
-                    <div style={{ ...styles.card, border: '1px solid #ffb74d', background: '#1a1810' }}>
-                        <h4 style={{ color: '#ffb74d', marginTop: 0, fontSize: '16px' }}>Record Expenses (Ingredients/COGS)</h4>
-                        <form onSubmit={handleAddExpense} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            <input type="text" placeholder="Description (e.g. Bought Chicken)" value={expDesc} onChange={e => setExpDesc(e.target.value)} style={styles.input} />
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                                <input type="number" step="0.01" placeholder="Amount ₱" value={expAmount} onChange={e => setExpAmount(e.target.value)} style={styles.input} required />
-                                <input type="date" value={expDate} onChange={e => setExpDate(e.target.value)} style={styles.input} required />
-                            </div>
-                            <button type="submit" style={{ ...styles.btnPrimary, background: '#ffb74d', color: '#000' }}>ADD EXPENSE</button>
-                        </form>
-                    </div>
-
-                    {/* EXPENSE HISTORY */}
-                    <div style={styles.card}>
-                        <h4 style={{ color: '#888', marginTop: 0, fontSize: '16px' }}>Expense History</h4>
-                        <table style={styles.table}>
-                            <thead>
-                                <tr>
-                                    <th style={{ ...styles.th, width: '25%' }}>Date</th>
-                                    <th style={{ ...styles.th, width: '45%' }}>Description</th>
-                                    <th style={{ ...styles.th, width: '20%', textAlign: 'right' }}>Amount</th>
-                                    <th style={{ ...styles.th, width: '10%', textAlign: 'center' }}>Action</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {expenses.length === 0 ? (
-                                    <tr><td colSpan="4" style={{ ...styles.td, textAlign: 'center', color: '#777' }}>No expenses recorded.</td></tr>
-                                ) : (
-                                    expenses.map(exp => (
-                                        <tr key={exp.id}>
-                                            <td style={styles.td}>{exp.date}</td>
-                                            <td style={styles.td}>{exp.description || '-'}</td>
-                                            <td style={{ ...styles.td, textAlign: 'right', color: '#ffb74d', fontWeight: 'bold' }}>{formatPHP(exp.amount)}</td>
-                                            <td style={{ ...styles.td, textAlign: 'center' }}>
-                                                <button onClick={() => handleDeleteExpense(exp.id)} style={{ ...styles.btnDelete, padding: '4px 8px', fontSize: '12px' }}>DEL</button>
-                                            </td>
-                                        </tr>
-                                    ))
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
                 </>
             )}
 
@@ -761,8 +664,10 @@ function App() {
                                     <div style={{ color: '#bb86fc', fontWeight: 'bold', fontSize: '24px' }}>{formatPHP(report.total_labor)}</div>
                                 </div>
                                 <div style={styles.reportCard}>
-                                    <div style={{ color: '#888', fontSize: '12px', marginBottom: '5px' }}>EXPENSES (COGS)</div>
-                                    <div style={{ color: '#ffb74d', fontWeight: 'bold', fontSize: '24px' }}>{formatPHP(report.total_expenses)}</div>
+                                    <div style={{ color: '#888', fontSize: '12px', marginBottom: '5px' }}>STATUS</div>
+                                    <div style={{ fontSize: '16px', marginTop: '5px' }}>
+                                        <span style={{ color: '#ffb74d' }}>{report.pending_count} Pending</span> / <span style={{ color: '#03dac6' }}>{report.verified_count} Verified</span>
+                                    </div>
                                 </div>
                             </div>
 
