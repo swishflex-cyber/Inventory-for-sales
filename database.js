@@ -67,12 +67,24 @@ db.serialize(() => {
         FOREIGN KEY (created_by) REFERENCES users (id)
     )`);
 
+    // NEW: Expenses Table for COGS/Ingredients
+    db.run(`CREATE TABLE IF NOT EXISTS expenses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date DATE NOT NULL,
+        description TEXT,
+        amount REAL NOT NULL,
+        recorded_by INTEGER,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (recorded_by) REFERENCES users (id)
+    )`);
+
     // NEW: Daily Reports Table
     db.run(`CREATE TABLE IF NOT EXISTS daily_reports (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         report_date TEXT UNIQUE NOT NULL,
         total_revenue REAL DEFAULT 0,
         total_labor REAL DEFAULT 0,
+        total_expenses REAL DEFAULT 0,
         net_profit REAL DEFAULT 0,
         top_item_name TEXT,
         top_item_qty INTEGER DEFAULT 0,
