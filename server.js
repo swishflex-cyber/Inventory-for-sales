@@ -221,6 +221,35 @@ app.put('/api/inventory/:id/verify', authenticate, requireRole(['manager', 'admi
         [req.body.verified_value_sold, req.user.id, req.params.id], () => res.send('Verified'));
 });
 
+// NEW: DELETE INVENTORY LOG
+app.delete('/api/inventory/:id', authenticate, requireRole(['manager', 'admin']), (req, res) => {
+    const logId = req.params.id;
+
+    db.serialize(() => {
+        // 1. Get the date of the log before deleting it
+        db.get(`SELECT date FROM inventory_logs WHERE id = ?`, [logId], (err, row) => {
+            if (err) return res.status(500).send(err.message);
+            if (!row) return res.status(404).send('Log not found');
+
+            const targetDate = row.date;
+
+            // 2. Delete the Inventory Log
+            db.run(`DELETE FROM inventory_logs WHERE id = ?`, [logId], (err2) => {
+                if (err2) return res.status(500).send('Failed to delete log: ' + err2.message);
+
+                // 3. Delete the Cached Report for that date 
+                // This ensures the "Reports" tab doesn't show outdated data.
+                db.run(`DELETE FROM daily_reports WHERE report_date = ?`, [targetDate], (err3) => {
+                    if (err3) {
+                        console.error('Failed to delete report cache:', err3);
+                    }
+                    res.send('Log and corresponding report cache deleted.');
+                });
+            });
+        });
+    });
+});
+
 app.get('/api/inventory', authenticate, (req, res) => {
     db.all(`SELECT il.*, i.name as item_name, u.name as employee_name FROM inventory_logs il JOIN items i ON il.item_id = i.id JOIN users u ON il.user_id = u.id WHERE il.date = ?`, [req.query.date], (err, rows) => res.json(rows));
 });
@@ -256,7 +285,7 @@ app.get('/api/reports/daily', authenticate, requireRole(['manager', 'admin']), (
 // --- SERVE FRONTEND (Vite/React Build) ---
 app.use(express.static(path.join(__dirname, 'dist')));
 
-// Send index.html for any non-API routes (handles page refr)
+// Send index.html for any non-API routes (handles page refresh)
 app.get('/{*splat}', (req, res) => {
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
