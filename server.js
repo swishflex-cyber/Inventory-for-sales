@@ -31,19 +31,24 @@ function requireRole(roles) {
 }
 
 // --- DAILY REPORT GENERATOR FUNCTION ---
+// UPDATED: Includes Stock Purchases in Labor/Expense calculation
 function generateReportForDate(dateStr, callback) {
     db.all(`
         SELECT 
             COALESCE(SUM(verified_value_sold), 0) as revenue,
-            (SELECT COALESCE(SUM(amount), 0) FROM payroll_logs WHERE date = ?) as labor
+            (
+                SELECT COALESCE(SUM(amount), 0) FROM payroll_logs WHERE date = ?
+            ) + (
+                SELECT COALESCE(SUM(amount), 0) FROM stock_purchases WHERE date = ?
+            ) as total_expenses
         FROM inventory_logs 
         WHERE date = ? AND status = 'verified'
-    `, [dateStr, dateStr], (err, financeRows) => {
+    `, [dateStr, dateStr, dateStr], (err, financeRows) => {
         if (err) return callback ? callback(err) : console.error(err);
         
-        const finance = financeRows[0] || { revenue: 0, labor: 0 };
+        const finance = financeRows[0] || { revenue: 0, total_expenses: 0 };
         const revenue = parseFloat(finance.revenue) || 0;
-        const labor = parseFloat(finance.labor) || 0;
+        const labor = parseFloat(finance.total_expenses) || 0;
         const netProfit = revenue - labor;
 
         db.all(`
@@ -69,7 +74,7 @@ function generateReportForDate(dateStr, callback) {
                 const reportData = {
                     report_date: dateStr,
                     total_revenue: revenue,
-                    total_labor: labor,
+                    total_labor: labor, // Keeping field name for compatibility, but now includes stock
                     net_profit: netProfit,
                     top_item_name: topItem ? topItem.name : 'N/A',
                     top_item_qty: topItem ? topItem.total_qty : 0,
@@ -238,7 +243,6 @@ app.delete('/api/inventory/:id', authenticate, requireRole(['manager', 'admin'])
                 if (err2) return res.status(500).send('Failed to delete log: ' + err2.message);
 
                 // 3. Delete the Cached Report for that date 
-                // This ensures the "Reports" tab doesn't show outdated data.
                 db.run(`DELETE FROM daily_reports WHERE report_date = ?`, [targetDate], (err3) => {
                     if (err3) {
                         console.error('Failed to delete report cache:', err3);
@@ -264,9 +268,55 @@ app.get('/api/payroll', authenticate, requireRole(['manager', 'admin']), (req, r
     db.all(`SELECT pl.*, u.name as employee_name FROM payroll_logs pl JOIN users u ON pl.user_id = u.id ORDER BY date DESC`, [], (err, rows) => res.json(rows));
 });
 
+// --- STOCK PURCHASES ROUTES (NEW) ---
+// Create a new Stock Purchase
+app.post('/api/stock-purchases', authenticate, requireRole(['manager', 'admin']), (req, res) => {
+    const { date, description, amount } = req.body;
+    db.run(`INSERT INTO stock_purchases (date, description, amount, created_by) VALUES (?, ?, ?, ?)`, 
+        [date, description || 'Stock Purchase', amount, req.user.id], function(err) {
+            if (err) return res.status(500).send(err.message);
+            res.send({ id: this.lastID });
+        });
+});
+
+// Get Stock Purchases History
+app.get('/api/stock-purchases', authenticate, requireRole(['manager', 'admin']), (req, res) => {
+    db.all(`SELECT sp.*, u.name as creator_name FROM stock_purchases sp JOIN users u ON sp.created_by = u.id ORDER BY date DESC`, [], (err, rows) => res.json(rows));
+});
+
+// Delete Stock Purchase
+app.delete('/api/stock-purchases/:id', authenticate, requireRole(['manager', 'admin']), (req, res) => {
+    const id = req.params.id;
+    db.get(`SELECT date FROM stock_purchases WHERE id = ?`, [id], (err, row) => {
+        if (err) return res.status(500).send(err.message);
+        if (!row) return res.status(404).send('Purchase not found');
+
+        db.serialize(() => {
+            db.run(`DELETE FROM stock_purchases WHERE id = ?`, [id], (err2) => {
+                if (err2) return res.status(500).send('Failed to delete purchase');
+                
+                // Delete the cached report for that date to ensure it recalculates
+                db.run(`DELETE FROM daily_reports WHERE report_date = ?`, [row.date], (err3) => {
+                    if (err3) console.error('Failed to delete report cache');
+                    res.send('Purchase deleted and report cache cleared.');
+                });
+            });
+        });
+    });
+});
+
 // --- FINANCE ROUTES ---
+// UPDATED: Includes Stock Purchases in Labor/Expense calculation
 app.get('/api/finance/daily', authenticate, requireRole(['manager', 'admin']), (req, res) => {
-    db.all(`SELECT (SELECT COALESCE(SUM(verified_value_sold), 0) FROM inventory_logs WHERE date = ? AND status='verified') as revenue, (SELECT COALESCE(SUM(amount), 0) FROM payroll_logs WHERE date = ?) as labor`, [req.query.date, req.query.date], (err, results) => {
+    db.all(`
+        SELECT 
+            (SELECT COALESCE(SUM(verified_value_sold), 0) FROM inventory_logs WHERE date = ? AND status='verified') as revenue, 
+            (
+                SELECT COALESCE(SUM(amount), 0) FROM payroll_logs WHERE date = ?
+            ) + (
+                SELECT COALESCE(SUM(amount), 0) FROM stock_purchases WHERE date = ?
+            ) as labor
+    `, [req.query.date, req.query.date, req.query.date], (err, results) => {
         const r = results[0];
         res.json({ revenue: r.revenue, labor: r.labor, netProfit: r.revenue - r.labor });
     });
