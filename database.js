@@ -1,108 +1,195 @@
-const path = require('path');
-const sqlite3 = require('sqlite3').verbose();
-const bcrypt = require('bcryptjs');
+// database.js - Updated to use Firebase Firestore instead of SQLite
+import { db } from "./firebase";
+import { 
+  collection, 
+  addDoc, 
+  doc, 
+  getDoc, 
+  updateDoc, 
+  deleteDoc, 
+  query, 
+  where, 
+  orderBy, 
+  onSnapshot,
+  getDocs,
+  serverTimestamp 
+} from 'firebase/firestore';
+import bcrypt from 'bcryptjs';
 
-// On Render, the persistent disk is mounted at /data
-const dbPath = process.env.DB_PATH || path.join(__dirname, 'vespoint.db');
+// Collections
+const usersCollection = collection(db, 'users');
+const itemsCollection = collection(db, 'items');
+const inventoryLogsCollection = collection(db, 'inventory_logs');
+const attendanceLogsCollection = collection(db, 'attendance_logs');
+const payrollLogsCollection = collection(db, 'payroll_logs');
+const dailyReportsCollection = collection(db, 'daily_reports');
 
-const db = new sqlite3.Database(dbPath, (err) => {
-    if (err) console.error('Could not connect to database', err);
-    else console.log('Connected to database:', dbPath);
-});
+// --- User Functions ---
+export async function addUser(userData) {
+  const docRef = await addDoc(usersCollection, {
+    ...userData,
+    pin_hash: bcrypt.hashSync(userData.pin, 10),
+    created_at: serverTimestamp()
+  });
+  return docRef.id;
+}
 
-db.serialize(() => {
-    // --- Create Tables ---
-    db.run(`CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        role TEXT NOT NULL,
-        pin_hash TEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`);
+export async function getUserById(id) {
+  const docRef = doc(db, 'users', id);
+  const docSnap = await getDoc(docRef);
+  return docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } : null;
+}
 
-    db.run(`CREATE TABLE IF NOT EXISTS items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        unit_cost REAL NOT NULL,
-        unit_price REAL NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`);
+export async function getUserByPin(pin) {
+  const q = query(usersCollection, where('pin_hash', '==', bcrypt.hashSync(pin, 10)));
+  const querySnapshot = await getDocs(q);
+  return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+}
 
-    db.run(`CREATE TABLE IF NOT EXISTS inventory_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        item_id INTEGER,
-        date DATE DEFAULT (DATE('now')),
-        qty_sold INTEGER DEFAULT 0,
-        qty_waste INTEGER DEFAULT 0,
-        value_sold REAL DEFAULT 0,
-        notes_employee TEXT,
-        status TEXT DEFAULT 'pending',
-        verified_qty_sold INTEGER,
-        verified_qty_waste INTEGER,
-        verified_value_sold REAL,
-        notes_manager TEXT,
-        verified_by INTEGER,
-        FOREIGN KEY (user_id) REFERENCES users (id),
-        FOREIGN KEY (item_id) REFERENCES items (id)
-    )`);
+export async function updateUser(id, updates) {
+  const docRef = doc(db, 'users', id);
+  await updateDoc(docRef, updates);
+}
 
-    db.run(`CREATE TABLE IF NOT EXISTS attendance_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        date DATE DEFAULT (DATE('now')),
-        status TEXT NOT NULL,
-        notes TEXT,
-        FOREIGN KEY (user_id) REFERENCES users (id)
-    )`);
+export async function deleteUser(id) {
+  const docRef = doc(db, 'users', id);
+  await deleteDoc(docRef);
+}
 
-    db.run(`CREATE TABLE IF NOT EXISTS payroll_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        date DATE NOT NULL,
-        amount REAL NOT NULL,
-        notes TEXT,
-        created_by INTEGER,
-        FOREIGN KEY (user_id) REFERENCES users (id),
-        FOREIGN KEY (created_by) REFERENCES users (id)
-    )`);
+// --- Items Functions ---
+export async function addItem(itemData) {
+  const docRef = await addDoc(itemsCollection, {
+    ...itemData,
+    created_at: serverTimestamp()
+  });
+  return docRef.id;
+}
 
-    // NEW: Daily Reports Table
-    db.run(`CREATE TABLE IF NOT EXISTS daily_reports (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        report_date TEXT UNIQUE NOT NULL,
-        total_revenue REAL DEFAULT 0,
-        total_labor REAL DEFAULT 0,
-        net_profit REAL DEFAULT 0,
-        top_item_name TEXT,
-        top_item_qty INTEGER DEFAULT 0,
-        top_item_revenue REAL DEFAULT 0,
-        pending_count INTEGER DEFAULT 0,
-        verified_count INTEGER DEFAULT 0,
-        generated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`);
+export async function getAllItems() {
+  const q = query(itemsCollection, orderBy('name'));
+  const querySnapshot = await getDocs(q);
+  return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+}
 
-    // --- Admin PIN Logic ---
-    const adminPin = bcrypt.hashSync('4545', 10);
+export async function getItemById(id) {
+  const docRef = doc(db, 'items', id);
+  const docSnap = await getDoc(docRef);
+  return docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } : null;
+}
 
-    // Check if admin exists
-    db.get(`SELECT id FROM users WHERE role = 'admin' LIMIT 1`, (err, user) => {
-        if (err) throw err;
+// --- Inventory Logs Functions ---
+export async function addInventoryLog(logData) {
+  const docRef = await addDoc(inventoryLogsCollection, {
+    ...logData,
+    date: new Date().toISOString().split('T')[0],
+    created_at: serverTimestamp()
+  });
+  return docRef.id;
+}
 
-        if (user) {
-            // Update existing admin PIN
-            db.run(`UPDATE users SET pin_hash = ? WHERE role = 'admin'`, [adminPin], (err) => {
-                if (err) console.error('Update Admin PIN failed:', err);
-                else console.log('Admin PIN updated to 4545');
-            });
-        } else {
-            // Create new admin if not found
-            db.run(`INSERT INTO users (name, role, pin_hash) VALUES ('VesPoint Admin', 'admin', ?)`, [adminPin], (err) => {
-                if (err) console.error('Insert Admin failed:', err);
-                else console.log('Admin created with PIN 4545');
-            });
-        }
+export async function getInventoryLogs(userId = null, date = null) {
+  let q = inventoryLogsCollection;
+  
+  if (userId) {
+    q = query(q, where('user_id', '==', userId));
+  }
+  if (date) {
+    q = query(q, where('date', '==', date));
+  }
+  
+  q = query(q, orderBy('date', 'desc'));
+  const querySnapshot = await getDocs(q);
+  return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+}
+
+// --- Attendance Logs Functions ---
+export async function addAttendanceLog(logData) {
+  const docRef = await addDoc(attendanceLogsCollection, {
+    ...logData,
+    date: new Date().toISOString().split('T')[0],
+    created_at: serverTimestamp()
+  });
+  return docRef.id;
+}
+
+export async function getAttendanceLogs(userId, date) {
+  const q = query(
+    attendanceLogsCollection, 
+    where('user_id', '==', userId),
+    where('date', '==', date)
+  );
+  const querySnapshot = await getDocs(q);
+  return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+}
+
+// --- Payroll Logs Functions ---
+export async function addPayrollLog(logData) {
+  const docRef = await addDoc(payrollLogsCollection, {
+    ...logData,
+    created_at: serverTimestamp()
+  });
+  return docRef.id;
+}
+
+export async function getPayrollLogs(userId) {
+  const q = query(payrollLogsCollection, where('user_id', '==', userId));
+  const querySnapshot = await getDocs(q);
+  return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+}
+
+// --- Daily Reports Functions ---
+export async function addDailyReport(reportData) {
+  const docRef = await addDoc(dailyReportsCollection, {
+    ...reportData,
+    generated_at: serverTimestamp()
+  });
+  return docRef.id;
+}
+
+export async function getDailyReport(date) {
+  const q = query(dailyReportsCollection, where('report_date', '==', date));
+  const querySnapshot = await getDocs(q);
+  return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+}
+
+// --- Real-time Listeners ---
+export function listenToInventoryLogs(userId, callback) {
+  const q = query(
+    inventoryLogsCollection, 
+    where('user_id', '==', userId),
+    orderBy('date', 'desc')
+  );
+  
+  return onSnapshot(q, (querySnapshot) => {
+    const logs = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    callback(logs);
+  });
+}
+
+// --- Admin PIN Setup ---
+export async function setupAdminPin() {
+  const adminPin = bcrypt.hashSync('4545', 10);
+  
+  // Check if admin exists
+  const q = query(usersCollection, where('role', '==', 'admin'));
+  const querySnapshot = await getDocs(q);
+  
+  if (querySnapshot.docs.length > 0) {
+    // Update existing admin
+    const adminDoc = querySnapshot.docs[0];
+    await updateDoc(doc(db, 'users', adminDoc.id), { pin_hash: adminPin });
+    console.log('Admin PIN updated to 4545');
+  } else {
+    // Create new admin
+    await addDoc(usersCollection, {
+      name: 'VesPoint Admin',
+      role: 'admin',
+      pin_hash: adminPin,
+      created_at: serverTimestamp()
     });
-});
+    console.log('Admin created with PIN 4545');
+  }
+}
 
-module.exports = db;
+// Call admin setup on module load
+setupAdminPin();
