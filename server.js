@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
 const db = require('./database');
 const bcrypt = require('bcryptjs');
 const { signToken, verifyToken } = require('./auth');
@@ -23,7 +22,7 @@ function authenticate(req, res, next) {
 
 function requireRole(roles) {
     return (req, res, next) => {
-        if (!req.user || !roles.includes(req.user.role)) {
+        if (!roles.includes(req.user.role)) {
             return res.status(403).send('Insufficient permissions');
         }
         next();
@@ -163,10 +162,12 @@ app.get('/api/auth/users', authenticate, requireRole(['admin', 'manager']), (req
     db.all(`SELECT id, name, role FROM users`, [], (err, rows) => res.json(rows));
 });
 
+// UPDATED: DELETE USER ENDPOINT (Admin can delete Employee or Manager)
 app.delete('/api/auth/users/:id', authenticate, requireRole(['admin']), (req, res) => {
     const targetId = parseInt(req.params.id);
     const requesterId = req.user.id;
 
+    // Safety: Cannot delete yourself
     if (targetId === requesterId) {
         return res.status(400).send('You cannot delete your own account.');
     }
@@ -175,10 +176,12 @@ app.delete('/api/auth/users/:id', authenticate, requireRole(['admin']), (req, re
         if (err) return res.status(500).send(err.message);
         if (!targetUser) return res.status(404).send('User not found');
 
+        // Safety: Admins cannot delete other Admins
         if (targetUser.role === 'admin') {
             return res.status(403).send('Cannot delete another Admin. Please demote them first.');
         }
 
+        // Allowed Roles: Employee, Manager
         db.run(`DELETE FROM users WHERE id = ?`, [targetId], function(err) {
             if (err) return res.status(500).send('Error deleting user: ' + err.message);
             res.send(`Successfully deleted ${targetUser.name}`);
@@ -199,6 +202,7 @@ app.get('/api/items', authenticate, (req, res) => {
     db.all(`SELECT * FROM items ORDER BY id DESC`, [], (err, items) => res.json(items));
 });
 
+// UPDATED: ALLOW ANY AUTHENTICATED USER TO DELETE ITEM
 app.delete('/api/items/:id', authenticate, (req, res) => {
     db.serialize(() => {
         db.run(`DELETE FROM inventory_logs WHERE item_id = ?`, [req.params.id]);
@@ -219,35 +223,6 @@ app.post('/api/inventory', authenticate, (req, res) => {
 app.put('/api/inventory/:id/verify', authenticate, requireRole(['manager', 'admin']), (req, res) => {
     db.run(`UPDATE inventory_logs SET status = 'verified', verified_value_sold = ?, verified_by = ? WHERE id = ?`,
         [req.body.verified_value_sold, req.user.id, req.params.id], () => res.send('Verified'));
-});
-
-// NEW: DELETE INVENTORY LOG
-app.delete('/api/inventory/:id', authenticate, requireRole(['manager', 'admin']), (req, res) => {
-    const logId = req.params.id;
-
-    db.serialize(() => {
-        // 1. Get the date of the log before deleting it
-        db.get(`SELECT date FROM inventory_logs WHERE id = ?`, [logId], (err, row) => {
-            if (err) return res.status(500).send(err.message);
-            if (!row) return res.status(404).send('Log not found');
-
-            const targetDate = row.date;
-
-            // 2. Delete the Inventory Log
-            db.run(`DELETE FROM inventory_logs WHERE id = ?`, [logId], (err2) => {
-                if (err2) return res.status(500).send('Failed to delete log: ' + err2.message);
-
-                // 3. Delete the Cached Report for that date 
-                // This ensures the "Reports" tab doesn't show outdated data.
-                db.run(`DELETE FROM daily_reports WHERE report_date = ?`, [targetDate], (err3) => {
-                    if (err3) {
-                        console.error('Failed to delete report cache:', err3);
-                    }
-                    res.send('Log and corresponding report cache deleted.');
-                });
-            });
-        });
-    });
 });
 
 app.get('/api/inventory', authenticate, (req, res) => {
@@ -280,14 +255,6 @@ app.get('/api/reports/daily', authenticate, requireRole(['manager', 'admin']), (
         if (err) return res.status(500).send(err.message);
         res.json(row || null);
     });
-});
-
-// --- SERVE FRONTEND (Vite/React Build) ---
-app.use(express.static(path.join(__dirname, 'dist')));
-
-// Send index.html for any non-API routes (handles page refresh)
-app.get('/{*splat}', (req, res) => {
-    res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
 app.listen(5000, () => console.log('VesPoint Server running on port 5000'));
